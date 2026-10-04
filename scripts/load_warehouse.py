@@ -57,6 +57,13 @@ def main():
     pre.add_argument("--fabric-dir", default="Fabric")
     HERE = os.path.abspath(pre.parse_known_args()[0].fabric_dir)
     env = json.load(open(os.path.join(HERE, "test_environment.json"), encoding="utf-8"))
+    data_source = env.get("data_source", "csv")
+    if data_source == "synapse":
+        from load_synapse import load_synapse_data
+        load_synapse_data(env)
+        return
+    if data_source != "csv":
+        raise SystemExit(f"unsupported data_source: {data_source}")
     ap = argparse.ArgumentParser(parents=[pre])
     ap.add_argument("--server", default=env["warehouse_server"])
     ap.add_argument("--database", default=env["warehouse_database"])

@@ -39,6 +39,12 @@ and private project repositories can call a public workflow and check out its sc
 
    Optional: `"connection_id"` (pin the cloud connection), `"legacy_schemas": ["dbo"]` (drop the project's tables
    from an old schema before loading).
+
+  Projects may set `"data_source": "synapse"` and add a `"synapse"` object with `server`, `database`, `schema`, and
+  the allowlisted Gold `tables`. The loader then introspects those views, recreates only those table names in the
+  project's Warehouse schema, streams rows in batches, and checks destination row counts. The default remains
+  `"data_source": "csv"`; existing projects are unchanged. The GitHub Actions service principal must have database
+  `CONNECT` and `Storage Blob Data Reader` on the Synapse Gold account.
 3. `Fabric/warehouse_schema.sql`, `Fabric/schema.json`, `Fabric/test_data/<TABLE>.csv` (the project's export script).
 4. `.github/workflows/deploy-test.yml`:
 

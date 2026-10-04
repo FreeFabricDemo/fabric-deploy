@@ -68,6 +68,8 @@ jobs:
             sudo apt-get update -q && sudo ACCEPT_EULA=Y apt-get install -y -q msodbcsql18 unixodbc-dev
           fi
           pip install -r .fabric-deploy/requirements.txt
+      - name: Test Synapse loader
+        run: python3 -m unittest discover -s .fabric-deploy/tests -v
       - name: Azure login (OIDC)
         uses: azure/login@v2
         with:
