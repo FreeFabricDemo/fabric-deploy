@@ -1,0 +1,83 @@
+# Reusable deployment to the Fabric TEST workspace for every Power BI project of FreeFabricDemo.
+# Called from a project repository:
+#   jobs:
+#     deploy:
+#       uses: FreeFabricDemo/fabric-deploy/.github/workflows/deploy.yml@main
+#       permissions: { id-token: write, contents: read }
+#       secrets: inherit
+# Steps: load the project's test data into its own Warehouse schema, publish PowerBI/Fabric with fabric-cicd,
+# bind the model to the shareable cloud connection, refresh and check the status.
+# Identity: one service principal, GitHub OIDC (no client secret). The organisation's subject template
+# (repository_owner + job_workflow_ref) lets only this workflow, called from a FreeFabricDemo repository on
+# main, log in: subject repository_owner:FreeFabricDemo:job_workflow_ref:FreeFabricDemo/fabric-deploy/.github/workflows/deploy.yml@refs/heads/main
+name: Deploy to Fabric TEST (shared)
+
+on:
+  workflow_call:
+    inputs:
+      build_dir:
+        description: "Fabric-source build of the project"
+        type: string
+        default: PowerBI/Fabric
+      fabric_dir:
+        description: "Project folder with test_environment.json, warehouse_schema.sql, schema.json, test_data/"
+        type: string
+        default: Fabric
+      load_data:
+        description: "Reload the project's test data into the Warehouse"
+        type: boolean
+        default: true
+      debug:
+        description: "Verbose fabric-cicd log"
+        type: boolean
+        default: false
+    secrets:
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_CLIENT_ID:
+        required: true
+      FABRIC_TEST_WORKSPACE_ID:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      FABRIC_TEST_WORKSPACE_ID: ${{ secrets.FABRIC_TEST_WORKSPACE_ID }}
+    steps:
+      - name: Check out the project
+        uses: actions/checkout@v4
+      - name: Check out the shared deployment scripts
+        uses: actions/checkout@v4
+        with:
+          repository: FreeFabricDemo/fabric-deploy
+          ref: main
+          path: .fabric-deploy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ODBC Driver 18 (if missing) and Python packages
+        run: |
+          if ! (command -v odbcinst >/dev/null && odbcinst -q -d | grep -q "ODBC Driver 18 for SQL Server"); then
+            curl -sSL -o /tmp/packages-microsoft-prod.deb "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb"
+            sudo dpkg -i /tmp/packages-microsoft-prod.deb
+            sudo apt-get update -q && sudo ACCEPT_EULA=Y apt-get install -y -q msodbcsql18 unixodbc-dev
+          fi
+          pip install -r .fabric-deploy/requirements.txt
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: Load test data into the Warehouse
+        if: inputs.load_data
+        run: python3 .fabric-deploy/scripts/load_warehouse.py --fabric-dir "${{ inputs.fabric_dir }}"
+      - name: Publish and refresh
+        run: >
+          python3 .fabric-deploy/scripts/deploy_test.py --build-dir "${{ inputs.build_dir }}"
+          --fabric-dir "${{ inputs.fabric_dir }}" ${{ inputs.debug && '--debug' || '' }}
