@@ -18,7 +18,13 @@ and private project repositories can call a public workflow and check out its sc
 ## Connect a new project
 
 1. Repository in `FreeFabricDemo` with the Fabric variant of the build in `PowerBI/Fabric` (framework skill
-   `powerbi-fabric-test-cicd`).
+   `powerbi-fabric-test-cicd`). Switch it to the organisation's OIDC subject template - repositories ignore it by
+   default (`use_default: true`), also new ones:
+
+   ```bash
+   gh api -X PUT repos/FreeFabricDemo/<repo>/actions/oidc/customization/sub -F use_default=false
+   gh api repos/FreeFabricDemo/<repo>/actions/oidc/customization/sub   # include_claim_keys: repository_owner, job_workflow_ref
+   ```
 2. `Fabric/test_environment.json` (no secrets):
 
    ```json
@@ -59,8 +65,8 @@ and private project repositories can call a public workflow and check out its sc
        secrets: inherit
    ```
 
-Nothing else: the secrets are organisation secrets, the federated credential covers every repository of the
-organisation, the cloud connection is found by `server;database`.
+Nothing else (no Azure change): the secrets are organisation secrets, the federated credential covers every
+repository of the organisation that uses the template, the cloud connection is found by `server;database`.
 
 ## Rules for a shared workspace and Warehouse
 
@@ -98,7 +104,8 @@ The OAuth token expires when the owner's sign-in is no longer valid (password ch
 
 | Symptom | Cause / fix |
 |---|---|
-| `AADSTS70021` at Azure login | subject ≠ federated credential: caller not in FreeFabricDemo, workflow not called `@main`, or the template / credential changed |
+| `AADSTS700213` / `AADSTS70021` at Azure login, subject `repo:FreeFabricDemo@<id>/<repo>@<id>:…` | the repository still uses the default subject - step 1 (`use_default=false`) |
+| Same error, subject `repository_owner:…:job_workflow_ref:…` | the federated credential is missing or different, or the workflow was not called `@main` |
 | No matching connection | connection not shared with the principal or other server / database; the script lists the visible connections; pin `connection_id` |
 | Refresh fails with a credentials error | the owner's OAuth token on the connection expired → *Edit credentials* |
 | `CREATE SCHEMA` denied | create the project schema once by hand in the Warehouse |
