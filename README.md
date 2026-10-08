@@ -39,6 +39,9 @@ and private project repositories can call a public workflow and check out its sc
 
    Optional: `"connection_id"` (pin the cloud connection), `"legacy_schemas": ["dbo"]` (drop the project's tables
    from an old schema before loading).
+   `"post_load_sql": "generate_volume.sql"` runs a SQL file of the project (relative to `Fabric/`) after the CSV
+   data, e.g. volume test data generated in the Warehouse with `INSERT ... SELECT` / CTAS instead of huge CSV files
+   (`{schema}` = `warehouse_schema`; statements split at `;`, none inside string literals).
 
   Projects may set `"data_source": "synapse"` and add a `"synapse"` object with `server`, `database`, `schema`, and
   the allowlisted Gold `tables`. The loader then introspects those views, recreates only those table names in the

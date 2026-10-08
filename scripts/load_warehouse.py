@@ -14,6 +14,11 @@ Tables are created in the project's own schema (`warehouse_schema` in test_envir
 several projects can share one Warehouse. Tables of this project left in an old schema (`legacy_schemas` in
 test_environment.json, e.g. dbo before the move to dbo_bom) are dropped first - only the project's own table names.
 
+Optional "post_load_sql" in test_environment.json: a SQL file of the project (path relative to <fabric-dir>) run after
+the CSV data, e.g. to generate volume test data inside the Warehouse with INSERT ... SELECT instead of committing huge
+CSV files. {schema} in the file is replaced by warehouse_schema; statements are split at semicolons (no semicolon
+inside string literals), lines starting with -- are skipped.
+
 Usage:  python3 scripts/load_warehouse.py [--fabric-dir Fabric] [--server <sql endpoint>] [--database <warehouse>]
 """
 import argparse
@@ -52,6 +57,18 @@ def literal(value, col):
     return "'" + value.replace("'", "''") + "'"
 
 
+def sql_statements(text, schema=None):
+    """Statements of a SQL script: split at semicolons, comment lines (--) dropped, {schema} replaced."""
+    if schema is not None:
+        text = text.replace("{schema}", schema)
+    statements = []
+    for part in text.split(";"):
+        stmt = "\n".join(l for l in part.splitlines() if not l.strip().startswith("--")).strip()
+        if stmt:
+            statements.append(stmt)
+    return statements
+
+
 def main():
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("--fabric-dir", default="Fabric")
@@ -78,10 +95,8 @@ def main():
             cur.execute(f"DROP TABLE IF EXISTS {old}.{table}")
         print(f"Dropped the project's tables from the old schema {old} (if present)")
     ddl = open(os.path.join(HERE, "warehouse_schema.sql"), encoding="utf-8").read()
-    for part in ddl.split(";"):
-        stmt = "\n".join(l for l in part.splitlines() if not l.strip().startswith("--")).strip()
-        if stmt:
-            cur.execute(stmt)
+    for stmt in sql_statements(ddl):
+        cur.execute(stmt)
     for table, cols in schema.items():
         with open(os.path.join(HERE, "test_data", f"{table}.csv"), newline="", encoding="utf-8") as f:
             rows = list(csv.reader(f))
@@ -95,6 +110,15 @@ def main():
         print(f"{table}: {n} rows (expected {len(data)})")
         if n != len(data):
             raise SystemExit(f"row count mismatch in {table}")
+    post_load = env.get("post_load_sql")
+    if post_load:
+        statements = sql_statements(open(os.path.join(HERE, post_load), encoding="utf-8").read(), ws)
+        for i, stmt in enumerate(statements, 1):
+            print(f"{post_load} {i}/{len(statements)}: {stmt.splitlines()[0][:100]}", flush=True)
+            cur.execute(stmt)
+        for table in schema:
+            n = cur.execute(f"SELECT COUNT(*) FROM {ws}.{table}").fetchone()[0]
+            print(f"{table}: {n} rows after {post_load}")
 
 
 if __name__ == "__main__":
