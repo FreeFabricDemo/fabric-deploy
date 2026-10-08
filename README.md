@@ -42,6 +42,10 @@ and private project repositories can call a public workflow and check out its sc
    `"post_load_sql": "generate_volume.sql"` runs a SQL file of the project (relative to `Fabric/`) after the CSV
    data, e.g. volume test data generated in the Warehouse with `INSERT ... SELECT` / CTAS instead of huge CSV files
    (`{schema}` = `warehouse_schema`; statements split at `;`, none inside string literals).
+   `"dax_tests": "dax_tests.json"` runs the project's DAX queries (`[{"name": ..., "query": "EVALUATE ..."}]`) after
+   the refresh through the executeQueries REST API, twice each (cold / warm cache), and prints the timings - a quick
+   performance check of the report's visuals. A failing query fails the run. Needs the tenant setting
+   "Dataset Execute Queries REST API" for the service principal.
 
   Projects may set `"data_source": "synapse"` and add a `"synapse"` object with `server`, `database`, `schema`, and
   the allowlisted Gold `tables`. The loader then introspects those views, recreates only those table names in the

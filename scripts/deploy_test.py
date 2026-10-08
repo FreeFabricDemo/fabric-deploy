@@ -8,7 +8,10 @@ Steps:
   1. publish the items of the build folder with fabric-cicd (SemanticModel, Report),
   2. bind the model's Warehouse data source to the shareable cloud connection (OAuth2 of the owner, shared with the
      service principal - no secret in GitHub),
-  3. start a refresh of the semantic model (Power BI REST API) and wait for the result.
+  3. start a refresh of the semantic model (Power BI REST API) and wait for the result,
+  4. optional "dax_tests" in test_environment.json: a JSON file of the project (relative to <fabric-dir>) with
+     [{"name": ..., "query": "EVALUATE ..."}]; every query runs twice through the executeQueries REST API
+     (cold / warm cache) and the timings are printed. A failing query fails the run, a slow one does not.
 
 Authentication: DefaultAzureCredential (GitHub Actions: service principal via OIDC / azure/login; locally `az login`).
 
@@ -108,6 +111,46 @@ def refresh(credential, workspace_id, model_name, connection_id=None, timeout_s=
     sys.exit("refresh did not finish in time")
 
 
+def dataset_id(headers, workspace_id, model_name):
+    datasets = requests.get(f"{PBI}/groups/{workspace_id}/datasets", headers=headers, timeout=60)
+    datasets.raise_for_status()
+    ds = next((d for d in datasets.json()["value"] if d["name"] == model_name), None)
+    if not ds:
+        sys.exit(f"semantic model {model_name} not found in the workspace")
+    return ds["id"]
+
+
+def run_dax_tests(credential, workspace_id, model_name, tests_path):
+    """Run the project's DAX test queries (executeQueries REST API) twice each and print cold / warm timings."""
+    tests = json.load(open(tests_path, encoding="utf-8"))
+    token = credential.get_token("https://analysis.windows.net/powerbi/api/.default").token
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"{PBI}/groups/{workspace_id}/datasets/{dataset_id(headers, workspace_id, model_name)}/executeQueries"
+    failed = []
+    print(f"DAX tests ({len(tests)}): cold s / warm s / rows")
+    for t in tests:
+        timings, rows, error = [], None, None
+        for _ in range(2):
+            start = time.time()
+            r = requests.post(url, headers=headers, timeout=600, json={
+                "queries": [{"query": t["query"]}], "serializerSettings": {"includeNulls": True}})
+            timings.append(time.time() - start)
+            body = r.json() if r.content else {}
+            result = (body.get("results") or [{}])[0]
+            if not r.ok or result.get("error"):
+                error = json.dumps(result.get("error") or body.get("error") or body)[:600]
+                break
+            rows = len(result["tables"][0]["rows"])
+        timing = " / ".join(f"{s:6.1f}" for s in timings)
+        if error:
+            failed.append(t["name"])
+            print(f"  FAIL {timing}  {t['name']}: {error}")
+        else:
+            print(f"  ok   {timing} / {rows:>7}  {t['name']}")
+    if failed:
+        sys.exit(f"DAX tests failed: {', '.join(failed)}")
+
+
 def show_target(credential, workspace_id):
     """Print the workspace name and the links of the published items (where to find the report)."""
     fab = {"Authorization": "Bearer " + credential.get_token("https://api.fabric.microsoft.com/.default").token}
@@ -147,6 +190,8 @@ def main():
     if not a.no_refresh:
         refresh(credential, a.workspace_id, env["semantic_model"], env.get("connection_id") or None)
         print("Refresh completed")
+        if env.get("dax_tests"):
+            run_dax_tests(credential, a.workspace_id, env["semantic_model"], os.path.join(a.fabric_dir, env["dax_tests"]))
 
 
 if __name__ == "__main__":
